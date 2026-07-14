@@ -46,58 +46,53 @@ inline ValueTypeCode aggResultType(mlir::daphne::GroupEnum op, ValueTypeCode inp
     return inputType;
 }
 
-// aggregateColumn aggregates one numeric rhs column into its output column.
+// aggregateColumn aggregates one numeric rhs column directly into its output
 template <typename VT>
 void aggTypedColumn(mlir::daphne::GroupEnum op, const VT *rhsAggColumn, const std::vector<bool> &rhsMatched,
-                    const std::vector<size_t> &rhsGroup, size_t numGroups, const std::vector<bool> &lhsMatched,
-                    const std::vector<size_t> &groupToOut, void *outColumn) {
+                    const std::vector<size_t> &rhsGroup, const std::vector<size_t> &groupToOut, size_t numOutRows,
+                    void *outColumn) {
     using mlir::daphne::GroupEnum;
     switch (op) {
     case GroupEnum::SUM: {
-        std::vector<VT> acc(numGroups, VT{0});
+        auto *out = static_cast<VT *>(outColumn);
+        std::fill(out, out + numOutRows, VT{0});
         for (size_t r = 0; r < rhsGroup.size(); r++)
             if (rhsMatched[r])
-                acc[rhsGroup[r]] += rhsAggColumn[r];
-        auto *out = static_cast<VT *>(outColumn);
-        for (size_t g = 0; g < numGroups; g++)
-            if (lhsMatched[g])
-                out[groupToOut[g]] = acc[g];
+                out[groupToOut[rhsGroup[r]]] += rhsAggColumn[r];
         break;
     }
     case GroupEnum::MIN: {
-        std::vector<VT> acc(numGroups, std::numeric_limits<VT>::max());
-        for (size_t r = 0; r < rhsGroup.size(); r++)
-            if (rhsMatched[r])
-                acc[rhsGroup[r]] = std::min(acc[rhsGroup[r]], rhsAggColumn[r]);
         auto *out = static_cast<VT *>(outColumn);
-        for (size_t g = 0; g < numGroups; g++)
-            if (lhsMatched[g])
-                out[groupToOut[g]] = acc[g];
+        std::fill(out, out + numOutRows, std::numeric_limits<VT>::max());
+        for (size_t r = 0; r < rhsGroup.size(); r++)
+            if (rhsMatched[r]) {
+                const size_t o = groupToOut[rhsGroup[r]];
+                out[o] = std::min(out[o], rhsAggColumn[r]);
+            }
         break;
     }
     case GroupEnum::MAX: {
-        std::vector<VT> acc(numGroups, std::numeric_limits<VT>::lowest());
-        for (size_t r = 0; r < rhsGroup.size(); r++)
-            if (rhsMatched[r])
-                acc[rhsGroup[r]] = std::max(acc[rhsGroup[r]], rhsAggColumn[r]);
         auto *out = static_cast<VT *>(outColumn);
-        for (size_t g = 0; g < numGroups; g++)
-            if (lhsMatched[g])
-                out[groupToOut[g]] = acc[g];
+        std::fill(out, out + numOutRows, std::numeric_limits<VT>::lowest());
+        for (size_t r = 0; r < rhsGroup.size(); r++)
+            if (rhsMatched[r]) {
+                const size_t o = groupToOut[rhsGroup[r]];
+                out[o] = std::max(out[o], rhsAggColumn[r]);
+            }
         break;
     }
     case GroupEnum::AVG: {
-        std::vector<double> sum(numGroups, 0.0);
-        std::vector<uint64_t> cnt(numGroups, 0);
+        auto *out = static_cast<double *>(outColumn);
+        std::fill(out, out + numOutRows, 0.0);
+        std::vector<uint64_t> cnt(numOutRows, 0);
         for (size_t r = 0; r < rhsGroup.size(); r++)
             if (rhsMatched[r]) {
-                sum[rhsGroup[r]] += static_cast<double>(rhsAggColumn[r]);
-                ++cnt[rhsGroup[r]];
+                const size_t o = groupToOut[rhsGroup[r]];
+                out[o] += rhsAggColumn[r];
+                ++cnt[o];
             }
-        auto *out = static_cast<double *>(outColumn);
-        for (size_t g = 0; g < numGroups; g++)
-            if (lhsMatched[g])
-                out[groupToOut[g]] = sum[g] / static_cast<double>(cnt[g]);
+        for (size_t o = 0; o < numOutRows; o++)
+            out[o] /= cnt[o];
         break;
     }
     default:
@@ -106,28 +101,27 @@ void aggTypedColumn(mlir::daphne::GroupEnum op, const VT *rhsAggColumn, const st
 }
 
 inline void aggregateColumn(mlir::daphne::GroupEnum op, ValueTypeCode inputType, const void *inRaw,
-                            const std::vector<bool> &rhsMatched, const std::vector<size_t> &rhsGroup, size_t numGroups,
-                            const std::vector<bool> &lhsMatched, const std::vector<size_t> &groupToOut,
-                            void *outColumn) {
+                            const std::vector<bool> &rhsMatched, const std::vector<size_t> &rhsGroup,
+                            const std::vector<size_t> &groupToOut, size_t numOutRows, void *outColumn) {
     switch (inputType) {
     case ValueTypeCode::SI64:
-        aggTypedColumn<int64_t>(op, static_cast<const int64_t *>(inRaw), rhsMatched, rhsGroup, numGroups, lhsMatched,
-                                groupToOut, outColumn);
+        aggTypedColumn<int64_t>(op, static_cast<const int64_t *>(inRaw), rhsMatched, rhsGroup, groupToOut, numOutRows,
+                                outColumn);
         break;
     case ValueTypeCode::UI64:
-        aggTypedColumn<uint64_t>(op, static_cast<const uint64_t *>(inRaw), rhsMatched, rhsGroup, numGroups, lhsMatched,
-                                 groupToOut, outColumn);
+        aggTypedColumn<uint64_t>(op, static_cast<const uint64_t *>(inRaw), rhsMatched, rhsGroup, groupToOut, numOutRows,
+                                 outColumn);
         break;
     case ValueTypeCode::F64:
-        aggTypedColumn<double>(op, static_cast<const double *>(inRaw), rhsMatched, rhsGroup, numGroups, lhsMatched,
-                               groupToOut, outColumn);
+        aggTypedColumn<double>(op, static_cast<const double *>(inRaw), rhsMatched, rhsGroup, groupToOut, numOutRows,
+                               outColumn);
         break;
     default:
         throw std::runtime_error("unsupported agg column type");
     }
 }
 
-}
+} // namespace group_join
 
 template <typename VTLhsTid>
 void groupJoin(Frame *&res, DenseMatrix<VTLhsTid> *&lhsTid, const Frame *lhs, const Frame *rhs, const char *lhsOn,
@@ -222,18 +216,15 @@ void groupJoin(Frame *&res, DenseMatrix<VTLhsTid> *&lhsTid, const Frame *lhs, co
         auto outColumn = res->getColumnRaw(c + 1);
         // handle COUNT explicitly
         if (op == mlir::daphne::GroupEnum::COUNT) {
-            std::vector<uint64_t> cnt(numLhsRows, 0);
+            auto *out = static_cast<uint64_t *>(outColumn);
+            std::fill(out, out + numMatchedGroups, 0);
             for (size_t r = 0; r < numRhsRows; r++)
                 if (rhsMatched[r])
-                    ++cnt[rhsGroup[r]];
-            auto *out = static_cast<uint64_t *>(outColumn);
-            for (size_t g = 0; g < numLhsRows; g++)
-                if (lhsMatched[g])
-                    out[groupToOut[g]] = cnt[g];
+                    ++out[groupToOut[rhsGroup[r]]];
             continue;
         }
         group_join::aggregateColumn(op, aggInputType[c], rhs->getColumnRaw(rhs->getColumnIdx(rhsCols[c])), rhsMatched,
-                                    rhsGroup, numLhsRows, lhsMatched, groupToOut, outColumn);
+                                    rhsGroup, groupToOut, numMatchedGroups, outColumn);
     }
 }
 
