@@ -95,4 +95,5 @@ class Statistics {
     void startKernelTimer(int kId);
     void stopKernelTimer(int kId);
     void dumpStatistics(KernelDispatchMapping &kdm);
+    void dumpStatisticsCsv(KernelDispatchMapping &kdm, const std::string &path);
 };

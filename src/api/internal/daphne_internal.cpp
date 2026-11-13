@@ -350,6 +350,7 @@ int startDAPHNE(int argc, const char **argv, DaphneLibResult *daphneLibRes, int 
                                   llvm::cl::init(configFileInitValue));
 
     static opt<bool> enableStatistics("statistics", cat(daphneOptions), desc("Enables runtime statistics output."));
+    static opt<std::string> statisticsFile( "statistics-file", cat(daphneOptions), value_desc("filename"), desc("Dump statistics into csv file"));
 
     static opt<bool> enablePropertyRecording(
         "enable-property-recording", cat(daphneOptions),
@@ -556,7 +557,8 @@ int startDAPHNE(int argc, const char **argv, DaphneLibResult *daphneLibRes, int 
         throw std::runtime_error("--enable-property-recording and --enable-property-insert are mutually exclusive, "
                                  "specify at most one of them");
 
-    user_config.enable_statistics = enableStatistics;
+    user_config.statistics_file = statisticsFile;
+    user_config.enable_statistics = enableStatistics || !user_config.statistics_file.empty();
 
     if (user_config.use_distributed && distributedBackEndSetup == ALLOCATION_TYPE::DIST_MPI) {
 #ifndef USE_MPI
@@ -768,7 +770,9 @@ int startDAPHNE(int argc, const char **argv, DaphneLibResult *daphneLibRes, int 
         std::cerr << "}" << std::endl;
     }
 
-    if (user_config.enable_statistics)
+    if (!user_config.statistics_file.empty())
+        Statistics::instance().dumpStatisticsCsv(KernelDispatchMapping::instance(), user_config.statistics_file);
+    else if (user_config.enable_statistics)
         Statistics::instance().dumpStatistics(KernelDispatchMapping::instance());
 
     if (user_config.enable_property_recording)

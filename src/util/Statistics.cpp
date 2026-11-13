@@ -19,7 +19,9 @@
 #include <fmt/core.h>
 #include <spdlog/spdlog.h>
 
+#include <fstream>
 #include <map>
+#include <stdexcept>
 
 Statistics &Statistics::instance() {
     static Statistics INSTANCE;
@@ -82,4 +84,14 @@ void Statistics::dumpStatistics(KernelDispatchMapping &kdm) {
         if (i > Statistics::MAX_STATS_COUNT)
             break;
     }
+}
+
+void Statistics::dumpStatisticsCsv(KernelDispatchMapping &kdm, const std::string &path) {
+    std::ofstream out(path);
+    if (!out)
+        throw std::runtime_error("could not open statistics file: " + path);
+    out << "kernel,file,line,column,count,seconds\n";
+    for (auto const &[kdmInfo, count, opTime] : processStatisticsPerOperator(kdm))
+        out << fmt::format("{},{},{},{},{},{:.9f}\n", kdmInfo.kernelName, kdmInfo.fileName, kdmInfo.line,
+                           kdmInfo.column, count, opTime);
 }
